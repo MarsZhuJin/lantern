@@ -39,25 +39,20 @@ var (
 	log              = golog.LoggerFor("lantern-android.protected")
 	currentProtect   Protect
 	currentDnsServer string
-	mutex            sync.RWMutex
 )
 
 func Configure(protect Protect, dnsServer string) {
-	mutex.Lock()
 	currentProtect = protect
 	if dnsServer != "" {
 		currentDnsServer = dnsServer
 	} else {
 		dnsServer = defaultDnsServer
 	}
-	mutex.Unlock()
 }
 
 // Resolve resolves the given address using a DNS lookup on a UDP socket
-// protected by the current Protector.
+// protected by the currnet Protector.
 func Resolve(addr string) (*net.TCPAddr, error) {
-	protect, dnsServer := getCurrent()
-
 	host, port, err := SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -79,12 +74,12 @@ func Resolve(addr string) (*net.TCPAddr, error) {
 	// Here we protect the underlying socket from the
 	// VPN connection by passing the file descriptor
 	// back to Java for exclusion
-	err = protect(socketFd)
+	err = currentProtect(socketFd)
 	if err != nil {
 		return nil, fmt.Errorf("Could not bind socket to system device: %v", err)
 	}
 
-	IPAddr = net.ParseIP(dnsServer)
+	IPAddr = net.ParseIP(currentDnsServer)
 	if IPAddr == nil {
 		return nil, errors.New("invalid IP address")
 	}
@@ -132,11 +127,6 @@ func Resolve(addr string) (*net.TCPAddr, error) {
 //   specified system device (this is primarily
 //   used for Android VpnService routing functionality)
 func Dial(network, addr string, timeout time.Duration) (net.Conn, error) {
-	protect, _ := getCurrent()
-	if protect == nil {
-		return net.DialTimeout(network, addr, timeout)
-	}
-
 	host, port, err := SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -164,7 +154,7 @@ func Dial(network, addr string, timeout time.Duration) (net.Conn, error) {
 	defer conn.cleanup()
 
 	// Actually protect the underlying socket here
-	err = protect(conn.socketFd)
+	err = currentProtect(conn.socketFd)
 	if err != nil {
 		return nil, fmt.Errorf("Could not bind socket to system device: %v", err)
 	}
@@ -278,10 +268,4 @@ func SplitHostPort(addr string) (string, int, error) {
 		return "", 0, err
 	}
 	return host, port, nil
-}
-
-func getCurrent() (Protect, string) {
-	mutex.RLock()
-	defer mutex.RUnlock()
-	return currentProtect, currentDnsServer
 }
